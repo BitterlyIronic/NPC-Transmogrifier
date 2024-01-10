@@ -1,7 +1,12 @@
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Synthesis;
 using Mutagen.Bethesda.Skyrim;
+using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Plugins.Records;
+using Mutagen.Bethesda.FormKeys.SkyrimSE;
+using Noggog;
 using System;
+using System.Drawing;
 
 namespace NPCTransmogrifier
 {
@@ -26,54 +31,166 @@ namespace NPCTransmogrifier
             var settings = Settings.Value; // Get the patcher's Settings
             var random = new Random(); // Create a random number generator
             int patchedNPCcount = 0; // Create a tracker that records how many NPCs were patched, which we can print at the end so the users knows if the patcher worked
+            var coreMods = settings.ModsToPatch.Select(x => state.LoadOrder.GetIfEnabled(x));
 
-            var npcs = state.LoadOrder.PriorityOrder.Npc().WinningOverrides().ToArray(); // Get all NPCs in the user's load order (only consider conflict winners, not any of the plugins that get overridden)
+            var npcs = coreMods.WinningOverrides<INpcGetter>().ToArray(); // Get all NPCs in the user's load order (only consider conflict winners, not any of the plugins that get overridden)
+
+            var headPartMap = new Dictionary<HeadPart.TypeEnum, Dictionary<IFormLink<IRaceGetter>, Dictionary<MaleFemaleGender, List<IHeadPartGetter>>>>();
+
+            foreach (HeadPart.TypeEnum type in Enum.GetValues(typeof(HeadPart.TypeEnum))) {
+                headPartMap[type] = new();
+            	foreach (var race in settings.RacesToPatch) {
+                    headPartMap[type][race] = new();
+                
+            		var headParts = state.LoadOrder.PriorityOrder.HeadPart().WinningOverrides().Where(x =>
+	                    x.Type == type &&
+	           	        !x.ValidRaces.IsNull &&
+	                    (x.Flags & HeadPart.Flag.Playable) == HeadPart.Flag.Playable &&
+	                    state.LinkCache.Resolve<IFormListGetter>(x.ValidRaces.FormKey).ContainsForm(race));
+	                
+            		headPartMap[type][race][MaleFemaleGender.Male] = headParts.Where(x => x.Flags.HasFlag(HeadPart.Flag.Male)).ToList();
+            		headPartMap[type][race][MaleFemaleGender.Female] = headParts.Where(x => x.Flags.HasFlag(HeadPart.Flag.Female)).ToList();
+            	}
+            }
             
-            foreach (var npcGetter in npcs) // loop through each NPC
+            foreach (var coreNPC in npcs.Where(x => settings.RacesToPatch.Contains(x.Race))) // loop through each NPC
             {
-                var npcSetter = state.PatchMod.Npcs.GetOrAddAsOverride(npcGetter); // create a new override for this NPC and add it to the Synthesis output mod
+            	if (!state.LinkCache.TryResolve<INpcGetter>(coreNPC.FormKey, out var npcGetter)) continue; //making the assumption that we haven't changed the npc's race
+                var localNPC = npcGetter.DeepCopy(); // create an in-memory copy of the NPC
+                var npcGender = localNPC.Configuration.Flags.HasFlag(NpcConfiguration.Flag.Female) ? MaleFemaleGender.Female : MaleFemaleGender.Male;
+                var npcChanged = false;
 
-                var npcFace = npcSetter.FaceMorph; // get the NPC's face morph
+                Console.WriteLine($"Patching {localNPC.EditorID}");
 
-                if (npcFace != null) // check to make sure the face morph isn't null (this can be the case for "creature-like" NPCs such as Draugr)
+                if (settings.PatchFaceMorph)
                 {
-                    // randomize all of the sliders using the function GenerateRandomFloatBetween (which needs you to pass in the minimum slider value, maximum slider value, and the random number generator we defined above)
-                    npcFace.BrowsForwardVsBack = GenerateRandomFloatBetween(settings.BrowsForwardVsBack_Min, settings.BrowsForwardVsBack_Max, random);
-                    npcFace.BrowsInVsOut = GenerateRandomFloatBetween(settings.BrowsInVsOut_Min, settings.BrowsInVsOut_Max, random);
-                    npcFace.BrowsUpVsDown = GenerateRandomFloatBetween(settings.BrowsUpVsDown_Min, settings.BrowsUpVsDown_Max, random);
-                    npcFace.CheeksForwardVsBack = GenerateRandomFloatBetween(settings.CheeksForwardVsBack_Min, settings.CheeksForwardVsBack_Max, random);
-                    npcFace.CheeksUpVsDown = GenerateRandomFloatBetween(settings.CheeksUpVsDown_Min, settings.CheeksUpVsDown_Max, random);
-                    npcFace.ChinNarrowVsWide = GenerateRandomFloatBetween(settings.ChinNarrowVsWide_Min, settings.ChinNarrowVsWide_Max, random);
-                    npcFace.ChinUnderbiteVsOverbite = GenerateRandomFloatBetween(settings.ChinUnderbiteVsOverbite_Min, settings.ChinUnderbiteVsOverbite_Max, random);
-                    npcFace.ChinUpVsDown = GenerateRandomFloatBetween(settings.ChinUpVsDown_Min, settings.ChinUpVsDown_Max, random);
-                    npcFace.EyesForwardVsBack = GenerateRandomFloatBetween(settings.EyesForwardVsBack_Min, settings.EyesForwardVsBack_Max, random);
-                    npcFace.EyesInVsOut = GenerateRandomFloatBetween(settings.EyesInVsOut_Min, settings.EyesInVsOut_Max, random);
-                    npcFace.EyesUpVsDown = GenerateRandomFloatBetween(settings.EyesUpVsDown_Min, settings.EyesUpVsDown_Max, random);
-                    npcFace.JawForwardVsBack = GenerateRandomFloatBetween(settings.JawForwardVsBack_Min, settings.JawForwardVsBack_Max, random);
-                    npcFace.JawNarrowVsWide = GenerateRandomFloatBetween(settings.JawNarrowVsWide_Min, settings.JawNarrowVsWide_Max, random);
-                    npcFace.JawUpVsDown = GenerateRandomFloatBetween(settings.JawUpVsDown_Min, settings.JawUpVsDown_Max, random);
-                    npcFace.LipsInVsOut = GenerateRandomFloatBetween(settings.LipsInVsOut_Min, settings.LipsInVsOut_Max, random);
-                    npcFace.LipsUpVsDown = GenerateRandomFloatBetween(settings.LipsInVsOut_Min, settings.LipsInVsOut_Max, random);
-                    npcFace.NoseLongVsShort = GenerateRandomFloatBetween(settings.NoseLongVsShort_Min, settings.NoseLongVsShort_Max, random);
-                    npcFace.NoseUpVsDown = GenerateRandomFloatBetween(settings.NoseUpVsDown_Min, settings.NoseUpVsDown_Max, random);
+                    localNPC.FaceMorph ??= new();
+                    var npcFace = localNPC.FaceMorph; // get the NPC's face morph
 
-                    patchedNPCcount++; // adds 1 to the patched NPC tracker
+                    // randomize all of the sliders
+                    npcFace.BrowsForwardVsBack = random.GenerateMorph();
+                    npcFace.BrowsInVsOut = random.GenerateMorph();
+                    npcFace.BrowsUpVsDown = random.GenerateMorph();
+                    npcFace.CheeksForwardVsBack = random.GenerateMorph();
+                    npcFace.CheeksUpVsDown = random.GenerateMorph();
+                    npcFace.ChinNarrowVsWide = random.GenerateMorph();
+                    npcFace.ChinUnderbiteVsOverbite = random.GenerateMorph();
+                    npcFace.ChinUpVsDown = random.GenerateMorph();
+                    npcFace.EyesForwardVsBack = random.GenerateMorph();
+                    npcFace.EyesInVsOut = random.GenerateMorph();
+                    npcFace.EyesUpVsDown = random.GenerateMorph();
+                    npcFace.JawForwardVsBack = random.GenerateMorph();
+                    npcFace.JawNarrowVsWide = random.GenerateMorph();
+                    npcFace.JawUpVsDown = random.GenerateMorph();
+                    npcFace.LipsInVsOut = random.GenerateMorph();
+                    npcFace.LipsUpVsDown = random.GenerateMorph();
+                    npcFace.NoseLongVsShort = random.GenerateMorph();
+                    npcFace.NoseUpVsDown = random.GenerateMorph();
+
+                    npcChanged = true;
+                }
+
+                if (settings.PatchHeadParts) {
+                    localNPC.HeadParts.Clear();
+
+                    // add hair
+                    var hairList = headPartMap[HeadPart.TypeEnum.Hair][localNPC.Race][npcGender];
+                    if (random.Next(100) < settings.HairChance && hairList.Any())
+                        localNPC.HeadParts.Add(hairList[random.Next(hairList.Count)]);
+
+                    // add eyes
+                    var eyeList = headPartMap[HeadPart.TypeEnum.Eyes][localNPC.Race][npcGender];
+                    if (eyeList.Any())
+                        localNPC.HeadParts.Add(eyeList[random.Next(eyeList.Count)]);
+
+                    // add eyebrows
+                    var eyebrowList = headPartMap[HeadPart.TypeEnum.Eyebrows][localNPC.Race][npcGender];
+                    if (random.Next(100) < settings.EyebrowChance && eyebrowList.Any())
+                        localNPC.HeadParts.Add(eyebrowList[random.Next(eyebrowList.Count)]);
+
+                    // add scars to some npcs
+                    var scarList = headPartMap[HeadPart.TypeEnum.Scars][localNPC.Race][npcGender];
+                    if (random.Next(100) < settings.ScarChance && scarList.Any())
+                        localNPC.HeadParts.Add(scarList[random.Next(scarList.Count)]);
+
+                    // add facial hair to some npcs
+                    var facialHairList = headPartMap[HeadPart.TypeEnum.FacialHair][localNPC.Race][npcGender];
+                    if (random.Next(100) < settings.FacialHairChance && facialHairList.Any())
+                        localNPC.HeadParts.Add(facialHairList[random.Next(facialHairList.Count)]);
+
+                    npcChanged = true;
+                }
+
+                if (settings.PatchFaceParts) {
+                	//TODO: figure out why this doesn't work
+                    localNPC.FaceParts ??= new();
+                    var faceParts = localNPC.FaceParts;
+                    var availableMorphs = state.LinkCache.Resolve<IRaceGetter>(localNPC.Race.FormKey)?.HeadData?[npcGender]?.AvailableMorphs ?? throw new Exception();
+
+                    faceParts.Nose = availableMorphs.Nose?.Data.PickRandomFromSpan(random) ?? 0;
+                    faceParts.Eyes = availableMorphs.Eye?.Data.PickRandomFromSpan(random) ?? 0;
+                    faceParts.Mouth = availableMorphs.Lip?.Data.PickRandomFromSpan(random) ?? 0;
+
+                    npcChanged = true;
+                }
+
+                if (settings.PatchHairColor) {
+                	//TODO: actually implement this
+                    var availableHairColors = state.LinkCache.Resolve<IRaceGetter>(localNPC.Race.FormKey)?.HeadData?[npcGender]?.AvailableHairColors ?? throw new Exception();
+                    npcChanged = true;
+                }
+
+                if (settings.PatchTextureLighting) {
+                    localNPC.TextureLighting = Color.FromArgb(
+                    	(int)(((random.Next(500001) + 30000) / 1000000f) * byte.MaxValue),
+                    	(int)(((random.Next(500001) + 30000) / 1000000f) * byte.MaxValue),
+                    	(int)(((random.Next(500001) + 30000) / 1000000f) * byte.MaxValue)
+                    );
+                    
+                    npcChanged = true;
+                }
+
+                if (npcChanged) {
+                	patchedNPCcount++;
+                	state.PatchMod.Npcs.Set(localNPC);
                 }
             }
 
             Console.WriteLine("Transmogrifier patched {0} NPCs", patchedNPCcount); // once the patcher loops through all NPCs, write a message to the screen to show the user how many NPCs were patched. The "{0}" will be replaced by the value of patchedNPCcount.
             // That's it!
         }
+    }
 
-        private static float GenerateRandomFloatBetween(float minValue, float maxValue, Random random) // Generate a random decimal number between min and max
+    internal static class Extentions {
+        internal static float GenerateMorph(this Random random) // Generate a random decimal number between min and max
         {
-            if (minValue >= maxValue)
-            {
-                throw new ArgumentException("minValue must be less than maxValue");
-            }
+            var morphVal = random.NextDouble() * random.NextDouble();
 
-            float randomValue = (float)random.NextDouble(); // generates a random value between 0.0 and 1.0
-            return minValue + randomValue * (maxValue - minValue);
+            if (random.NextInt64() % 2 == 0)
+                morphVal *= -1;
+
+            return (float)morphVal;
+        }
+
+        internal static bool ContainsForm<T>(this IFormListGetter formList, IFormLink<T> target) where T : class, IMajorRecordGetter {
+        	foreach (var item in formList.Items)
+                if (item.FormKey == target.FormKey)
+                    return true;
+
+        	return false;
+        }
+
+        internal static uint PickRandomFromSpan(this ReadOnlyMemorySlice<byte> span, Random random) {
+        	List<uint> possibleVals = new();
+			uint count = 0;
+			
+			foreach (var val in span) {
+				if (val > 0)
+					possibleVals.Add(count);
+				count++;
+			}
+        	
+        	return possibleVals[random.Next(possibleVals.Count)];
         }
     }
 }
