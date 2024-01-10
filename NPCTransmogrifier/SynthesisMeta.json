@@ -1,7 +1,7 @@
 {
   "Nickname": "NPC Transmogrifier",
   "Visibility": "Visible",
-  "OneLineDescription": "Randomizes NPC face morphs.",
+  "OneLineDescription": "Randomizes NPCs of selected races from selected mods in a number of ways",
   "LongDescription": "After using you need to regenerate FaceGen in the Creation Kit (or have Face Discoloration Fix installed)",
   "PreferredAutoVersioning": "Default",
   "RequiredMods": []
