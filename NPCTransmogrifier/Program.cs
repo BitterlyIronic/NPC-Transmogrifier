@@ -182,13 +182,16 @@ namespace NPCTransmogrifier
 
         internal static uint PickRandomFromSpan(this ReadOnlyMemorySlice<byte> span, Random random) {
         	List<uint> possibleVals = new();
-			uint count = 0;
+            var bytes = new byte[4];
 			
-			foreach (var val in span) {
-				if (val > 0)
-					possibleVals.Add(count);
-				count++;
-			}
+			for (int i = 0; i < 4; i++)
+                bytes[i] = span[i];
+
+            var flags = BitConverter.ToUInt32(bytes, 0);
+
+            for (int i = 0; i < 32; i++)
+                if ((flags & (1u << i)) != 0)
+                    possibleVals.Add((uint)i);
         	
         	return possibleVals[random.Next(possibleVals.Count)];
         }
